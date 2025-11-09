@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://c22lgjdac32gk"]
+
+[ext_resource type="Script" uid="uid://dofa40ffu030c" path="res://addons/godot_redis_client/examples/redis_example.gd" id="1_n2l0b"]
+
+[node name="RedisExample" type="Node"]
+script = ExtResource("1_n2l0b")
