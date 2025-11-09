@@ -28,7 +28,7 @@ func _init(host : String = "127.0.0.1", port : int = 6379, client_timeout_second
 	self.client_timeout_seconds = client_timeout_seconds
 	self.request_timeout_seconds = request_timeout_seconds
 
-func connect_to_redis() -> bool:
+func connect_to_redis(credentials : Dictionary = {}) -> bool:
 	connection = StreamPeerTCP.new() as StreamPeerTCP
 	_command_buffer = []
 	_pubsub_buffer = []
@@ -55,7 +55,12 @@ func connect_to_redis() -> bool:
 
 	_start_message_router()
 
-	var resp = await _send_command_array(["HELLO", "3"])
+	var hello_command = ["HELLO", "3"]
+	
+	if credentials.has("user"): hello_command.append(credentials["user"])
+	if credentials.has("pass"): hello_command.append(credentials["pass"])
+	
+	var resp = await _send_command_array(hello_command)
 
 	if resp is Dictionary and resp.has("error"):
 		push_warning("HELLO 3 failed, falling back to RESP2: %s" % resp["error"])

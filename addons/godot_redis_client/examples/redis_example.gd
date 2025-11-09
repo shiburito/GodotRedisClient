@@ -8,6 +8,8 @@ func _ready() -> void:
 func _test_redis() -> void:
 	redis = RedisClient.new() as RedisClient
 	var connected = await redis.connect_to_redis()
+	# Connecting with a user/pass 
+	# var auth_connected = await redis.connect_to_redis({"user": "test", "pass": "test123"})
 	redis.message_received.connect(_on_message_received)
 	redis.subscribed.connect(_on_subscribed)
 	print("Connected to redis: %s" % connected)
