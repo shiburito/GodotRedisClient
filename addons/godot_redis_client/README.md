@@ -8,6 +8,7 @@ This was largly built off of reading [Redis serialization protocol specification
 ## Basic Usage
 * `var redis : RedisClient = RedisClient.new() as RedisClient` - Initialize the client, can pass in host, port and timeouts
 * `var connected = await redis.connect_to_redis()` - Starts the actual connection to the redis client
+* `var auth_connected = await redis.connect_to_redis({"user": "test", "pass": "test123"})` - Connect with authentication info
 * `await redis.setex("test_key", "Initial Value", 60)` - Set a value with an expiry(seconds)
 * `await redis.set_value("test_key", "New Initial Value")` - Sets a value without an expiry
 * `var value = await redis.get_value("test_key")` - Get a value
