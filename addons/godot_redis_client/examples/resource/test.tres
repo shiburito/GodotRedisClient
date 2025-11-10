@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="ResourceExample" load_steps=2 format=3 uid="uid://dmv8qtqg20mky"]
+
+[ext_resource type="Script" uid="uid://bfyrem2u6hftl" path="res://addons/godot_redis_client/examples/resource/resource_example.gd" id="1_b363x"]
+
+[resource]
+script = ExtResource("1_b363x")
+metadata/_custom_type_script = "uid://bfyrem2u6hftl"

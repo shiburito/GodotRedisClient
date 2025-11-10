@@ -22,7 +22,7 @@ var run_mode : RUN_MODE
 
 enum RUN_MODE{DEFAULT,PUBLISH,SUBSCRIBE}
 
-func _init(host : String = "127.0.0.1", port : int = 6379, client_timeout_seconds : int = 5, request_timeout_seconds : int = 5) -> void:
+func _init(host : String = "127.0.0.1", port : int = 6379, client_timeout_seconds : int = 5, request_timeout_seconds : int = 30) -> void:
 	self.host = host
 	self.port = port
 	self.client_timeout_seconds = client_timeout_seconds
@@ -132,6 +132,123 @@ func delete(key: String) -> bool:
 		return false
 	return response == 1
 
+func incr(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run incr against a client in publish/subscribe mode %s" % key)
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["INCR", key])
+	if response is Dictionary and response.has("error"):
+		push_error("INCR failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func decr(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run decr against a client in publish/subscribe mode %s" % key)
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["DECR", key])
+	if response is Dictionary and response.has("error"):
+		push_error("DECR failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func incrby(key: String, increment: int) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run incrby against a client in publish/subscribe mode %s" % (key + " " + str(increment)))
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["INCRBY", key, str(increment)])
+	if response is Dictionary and response.has("error"):
+		push_error("INCRBY failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func decrby(key: String, decrement: int) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run decrby against a client in publish/subscribe mode %s" % (key + " " + str(decrement)))
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["DECRBY", key, str(decrement)])
+	if response is Dictionary and response.has("error"):
+		push_error("DECRBY failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func mget(keys: Array) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run mget against a client in publish/subscribe mode %s" % str(keys))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["MGET"]
+	args.append_array(keys)
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("MGET failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func mset(key_values: Dictionary) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run mset against a client in publish/subscribe mode %s" % str(key_values))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["MSET"]
+	for key in key_values:
+		args.append(key)
+		args.append(str(key_values[key]))
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("MSET failed: %s" % response["error"])
+		return false
+	return response == "OK"
+
+func getex(key: String, ttl: int) -> String:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run getex against a client in publish/subscribe mode %s" % (key + " " + str(ttl)))
+		return ""
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["GETEX", key, "EX", str(ttl)])
+	if response is Dictionary and response.has("error"):
+		push_error("GETEX failed: %s" % response["error"])
+		return ""
+	if response == null:
+		return ""
+	return str(response)
+
+func getdel(key: String) -> String:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run getdel against a client in publish/subscribe mode %s" % key)
+		return ""
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["GETDEL", key])
+	if response is Dictionary and response.has("error"):
+		push_error("GETDEL failed: %s" % response["error"])
+		return ""
+	if response == null:
+		return ""
+	return str(response)
+
+func hset_resource(key : String, resource : Resource, prop_names : Array[String] = []) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hset against a client in publish/subscribe mode %s" % (resource.resource_name + " " + resource.resource_path))
+		return false
+	if resource == null:
+		printerr("You must specify a non-null resource %s" % key)
+		return false	
+		
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var custom_props = {}
+	for prop in resource.get_property_list():
+		if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			if prop_names.is_empty() || prop_names.has(prop.name): custom_props[prop.name] = resource.get(prop.name)
+	
+	return await hset_multi(key, custom_props)
+	
+
 func hset(key: String, field: String, value: String) -> bool:
 	if run_mode && run_mode != RUN_MODE.DEFAULT:
 		printerr("You may not run hset against a client in publish/subscribe mode %s" % (key + " " + field + " " + value))
@@ -171,6 +288,104 @@ func hgetall(key: String) -> Dictionary:
 		return {}
 	return response
 
+func hincrby(key: String, field: String, increment: int) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hincrby against a client in publish/subscribe mode %s" % (key + " " + field + " " + str(increment)))
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["HINCRBY", key, field, str(increment)])
+	if response is Dictionary and response.has("error"):
+		push_error("HINCRBY failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func hget(key: String, field: String) -> String:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hget against a client in publish/subscribe mode %s" % (key + " " + field))
+		return ""
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["HGET", key, field])
+	if response is Dictionary and response.has("error"):
+		push_error("HGET failed: %s" % response["error"])
+		return ""
+	if response == null:
+		return ""
+	return str(response)
+
+func hdel(key: String, fields: Array) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hdel against a client in publish/subscribe mode %s" % (key + " " + str(fields)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["HDEL", key]
+	args.append_array(fields)
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("HDEL failed: %s" % response["error"])
+		return -1
+	return response if response is int else 0
+
+func hexists(key: String, field: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hexists against a client in publish/subscribe mode %s" % (key + " " + field))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["HEXISTS", key, field])
+	if response is Dictionary and response.has("error"):
+		push_error("HEXISTS failed: %s" % response["error"])
+		return false
+	return response == 1
+
+func hincrbyfloat(key: String, field: String, increment: float) -> float:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hincrbyfloat against a client in publish/subscribe mode %s" % (key + " " + field + " " + str(increment)))
+		return 0.0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["HINCRBYFLOAT", key, field, str(increment)])
+	if response is Dictionary and response.has("error"):
+		push_error("HINCRBYFLOAT failed: %s" % response["error"])
+		return 0.0
+	if response is String:
+		return float(response)
+	return float(response) if response else 0.0
+
+func hkeys(key: String) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hkeys against a client in publish/subscribe mode %s" % key)
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["HKEYS", key])
+	if response is Dictionary and response.has("error"):
+		push_error("HKEYS failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func hvals(key: String) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hvals against a client in publish/subscribe mode %s" % key)
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["HVALS", key])
+	if response is Dictionary and response.has("error"):
+		push_error("HVALS failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func hlen(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hlen against a client in publish/subscribe mode %s" % key)
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["HLEN", key])
+	if response is Dictionary and response.has("error"):
+		push_error("HLEN failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
 func expire(key: String, ttl: int) -> bool:
 	if run_mode && run_mode != RUN_MODE.DEFAULT:
 		printerr("You may not run expire against a client in publish/subscribe mode %s" % (key + " " + str(ttl)))
@@ -181,6 +396,493 @@ func expire(key: String, ttl: int) -> bool:
 		push_error("EXPIRE failed: %s" % response["error"])
 		return false
 	return response == 1
+
+func exists(keys: Array) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run exists against a client in publish/subscribe mode %s" % str(keys))
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["EXISTS"]
+	args.append_array(keys)
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("EXISTS failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func ttl(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run ttl against a client in publish/subscribe mode %s" % key)
+		return -2
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["TTL", key])
+	if response is Dictionary and response.has("error"):
+		push_error("TTL failed: %s" % response["error"])
+		return -2
+	return response if response is int else -2
+
+func pttl(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run pttl against a client in publish/subscribe mode %s" % key)
+		return -2
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["PTTL", key])
+	if response is Dictionary and response.has("error"):
+		push_error("PTTL failed: %s" % response["error"])
+		return -2
+	return response if response is int else -2
+
+func persist(key: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run persist against a client in publish/subscribe mode %s" % key)
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["PERSIST", key])
+	if response is Dictionary and response.has("error"):
+		push_error("PERSIST failed: %s" % response["error"])
+		return false
+	return response == 1
+
+func type(key: String) -> String:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run type against a client in publish/subscribe mode %s" % key)
+		return "none"
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["TYPE", key])
+	if response is Dictionary and response.has("error"):
+		push_error("TYPE failed: %s" % response["error"])
+		return "none"
+	return str(response)
+
+func rename(key: String, new_key: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run rename against a client in publish/subscribe mode %s" % (key + " " + new_key))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["RENAME", key, new_key])
+	if response is Dictionary and response.has("error"):
+		push_error("RENAME failed: %s" % response["error"])
+		return false
+	return response == "OK"
+
+func sadd(key: String, members: Array) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run sadd against a client in publish/subscribe mode %s" % (key + " " + str(members)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["SADD", key]
+	for member in members:
+		args.append(str(member))
+
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("SADD failed: %s" % response["error"])
+		return -1
+	return response if response is int else 0
+
+func srem(key: String, members: Array) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run srem against a client in publish/subscribe mode %s" % (key + " " + str(members)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["SREM", key]
+	for member in members:
+		args.append(str(member))
+
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("SREM failed: %s" % response["error"])
+		return -1
+	return response if response is int else 0
+
+func smembers(key: String) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run smembers against a client in publish/subscribe mode %s" % key)
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["SMEMBERS", key])
+	if response is Dictionary and response.has("error"):
+		push_error("SMEMBERS failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func sismember(key: String, member: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run sismember against a client in publish/subscribe mode %s" % (key + " " + member))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["SISMEMBER", key, member])
+	if response is Dictionary and response.has("error"):
+		push_error("SISMEMBER failed: %s" % response["error"])
+		return false
+	return response == 1
+
+func scard(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run scard against a client in publish/subscribe mode %s" % key)
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["SCARD", key])
+	if response is Dictionary and response.has("error"):
+		push_error("SCARD failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func sinter(keys: Array) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run sinter against a client in publish/subscribe mode %s" % str(keys))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["SINTER"]
+	args.append_array(keys)
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("SINTER failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func sunion(keys: Array) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run sunion against a client in publish/subscribe mode %s" % str(keys))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["SUNION"]
+	args.append_array(keys)
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("SUNION failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func sdiff(keys: Array) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run sdiff against a client in publish/subscribe mode %s" % str(keys))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["SDIFF"]
+	args.append_array(keys)
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("SDIFF failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func spop(key: String, count: int = 1) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run spop against a client in publish/subscribe mode %s" % (key + " " + str(count)))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response
+	if count == 1:
+		response = await _send_command_array(["SPOP", key])
+	else:
+		response = await _send_command_array(["SPOP", key, str(count)])
+	if response is Dictionary and response.has("error"):
+		push_error("SPOP failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	elif response == null:
+		return []
+	else:
+		return [response]
+
+func srandmember(key: String, count: int = 1) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run srandmember against a client in publish/subscribe mode %s" % (key + " " + str(count)))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response
+	if count == 1:
+		response = await _send_command_array(["SRANDMEMBER", key])
+	else:
+		response = await _send_command_array(["SRANDMEMBER", key, str(count)])
+	if response is Dictionary and response.has("error"):
+		push_error("SRANDMEMBER failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	elif response == null:
+		return []
+	else:
+		return [response]
+
+func smove(source: String, destination: String, member: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run smove against a client in publish/subscribe mode %s" % (source + " " + destination + " " + member))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["SMOVE", source, destination, member])
+	if response is Dictionary and response.has("error"):
+		push_error("SMOVE failed: %s" % response["error"])
+		return false
+	return response == 1
+
+func lpush(key: String, values: Array) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run lpush against a client in publish/subscribe mode %s" % (key + " " + str(values)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["LPUSH", key]
+	for value in values:
+		args.append(str(value))
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("LPUSH failed: %s" % response["error"])
+		return -1
+	return response if response is int else 0
+
+func rpush(key: String, values: Array) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run rpush against a client in publish/subscribe mode %s" % (key + " " + str(values)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["RPUSH", key]
+	for value in values:
+		args.append(str(value))
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("RPUSH failed: %s" % response["error"])
+		return -1
+	return response if response is int else 0
+
+func lpop(key: String, count: int = 1) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run lpop against a client in publish/subscribe mode %s" % (key + " " + str(count)))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response
+	if count == 1:
+		response = await _send_command_array(["LPOP", key])
+	else:
+		response = await _send_command_array(["LPOP", key, str(count)])
+	if response is Dictionary and response.has("error"):
+		push_error("LPOP failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	elif response == null:
+		return []
+	else:
+		return [str(response)]
+
+func rpop(key: String, count: int = 1) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run rpop against a client in publish/subscribe mode %s" % (key + " " + str(count)))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response
+	if count == 1:
+		response = await _send_command_array(["RPOP", key])
+	else:
+		response = await _send_command_array(["RPOP", key, str(count)])
+	if response is Dictionary and response.has("error"):
+		push_error("RPOP failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	elif response == null:
+		return []
+	else:
+		return [str(response)]
+
+func lrange(key: String, start: int, stop: int) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run lrange against a client in publish/subscribe mode %s" % (key + " " + str(start) + " " + str(stop)))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["LRANGE", key, str(start), str(stop)])
+	if response is Dictionary and response.has("error"):
+		push_error("LRANGE failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func llen(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run llen against a client in publish/subscribe mode %s" % key)
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["LLEN", key])
+	if response is Dictionary and response.has("error"):
+		push_error("LLEN failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func lindex(key: String, index: int) -> String:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run lindex against a client in publish/subscribe mode %s" % (key + " " + str(index)))
+		return ""
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["LINDEX", key, str(index)])
+	if response is Dictionary and response.has("error"):
+		push_error("LINDEX failed: %s" % response["error"])
+		return ""
+	if response == null:
+		return ""
+	return str(response)
+
+func ltrim(key: String, start: int, stop: int) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run ltrim against a client in publish/subscribe mode %s" % (key + " " + str(start) + " " + str(stop)))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["LTRIM", key, str(start), str(stop)])
+	if response is Dictionary and response.has("error"):
+		push_error("LTRIM failed: %s" % response["error"])
+		return false
+	return response == "OK"
+
+func blpop(keys: Array, timeout_seconds: int) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run blpop against a client in publish/subscribe mode %s" % str(keys))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["BLPOP"]
+	args.append_array(keys)
+	args.append(str(timeout_seconds))
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("BLPOP failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func brpop(keys: Array, timeout_seconds: int) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run brpop against a client in publish/subscribe mode %s" % str(keys))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["BRPOP"]
+	args.append_array(keys)
+	args.append(str(timeout_seconds))
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("BRPOP failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func zadd(key: String, score_members: Dictionary) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zadd against a client in publish/subscribe mode %s" % (key + " " + str(score_members)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["ZADD", key]
+	for member in score_members:
+		args.append(str(score_members[member]))
+		args.append(str(member))
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("ZADD failed: %s" % response["error"])
+		return -1
+	return response if response is int else 0
+
+func zrem(key: String, members: Array) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zrem against a client in publish/subscribe mode %s" % (key + " " + str(members)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["ZREM", key]
+	args.append_array(members)
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("ZREM failed: %s" % response["error"])
+		return -1
+	return response if response is int else 0
+
+func zrange(key: String, start: int, stop: int, with_scores: bool = false) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zrange against a client in publish/subscribe mode %s" % (key + " " + str(start) + " " + str(stop)))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["ZRANGE", key, str(start), str(stop)]
+	if with_scores:
+		args.append("WITHSCORES")
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("ZRANGE failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func zrangebyscore(key: String, min_score: String, max_score: String, with_scores: bool = false) -> Array:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zrangebyscore against a client in publish/subscribe mode %s" % (key + " " + min_score + " " + max_score))
+		return []
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var args = ["ZRANGEBYSCORE", key, min_score, max_score]
+	if with_scores:
+		args.append("WITHSCORES")
+	var response = await _send_command_array(args)
+	if response is Dictionary and response.has("error"):
+		push_error("ZRANGEBYSCORE failed: %s" % response["error"])
+		return []
+	if response is Array:
+		return response
+	return []
+
+func zincrby(key: String, increment: float, member: String) -> float:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zincrby against a client in publish/subscribe mode %s" % (key + " " + str(increment) + " " + member))
+		return 0.0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["ZINCRBY", key, str(increment), member])
+	if response is Dictionary and response.has("error"):
+		push_error("ZINCRBY failed: %s" % response["error"])
+		return 0.0
+	if response is String:
+		return float(response)
+	return float(response) if response else 0.0
+
+func zcard(key: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zcard against a client in publish/subscribe mode %s" % key)
+		return 0
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["ZCARD", key])
+	if response is Dictionary and response.has("error"):
+		push_error("ZCARD failed: %s" % response["error"])
+		return 0
+	return response if response is int else 0
+
+func zscore(key: String, member: String) -> String:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zscore against a client in publish/subscribe mode %s" % (key + " " + member))
+		return ""
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["ZSCORE", key, member])
+	if response is Dictionary and response.has("error"):
+		push_error("ZSCORE failed: %s" % response["error"])
+		return ""
+	if response == null:
+		return ""
+	return str(response)
+
+func zrank(key: String, member: String) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run zrank against a client in publish/subscribe mode %s" % (key + " " + member))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
+	var response = await _send_command_array(["ZRANK", key, member])
+	if response is Dictionary and response.has("error"):
+		push_error("ZRANK failed: %s" % response["error"])
+		return -1
+	if response == null:
+		return -1
+	return response if response is int else -1
 
 func publish(channel: String, message: String) -> int:
 	if run_mode && run_mode != RUN_MODE.PUBLISH:
@@ -396,6 +1098,9 @@ func _encode_resp_type(value) -> PackedByteArray:
 	elif value is int:
 		var int_str = ":%d\r\n" % value
 		result.append_array(int_str.to_utf8_buffer())
+	elif value is float:
+		var double_str = ",%s\r\n" % str(value)
+		result.append_array(double_str.to_utf8_buffer())
 	elif value is Array:
 		var arr_header = "*%d\r\n" % value.size()
 		result.append_array(arr_header.to_utf8_buffer())
@@ -451,10 +1156,16 @@ func _try_parse_resp_from_buffer(buffer: PackedByteArray) -> Dictionary:
 			return _parse_error(buffer)
 		":":
 			return _parse_integer(buffer)
+		"#":
+			return _parse_boolean(buffer)
+		",":
+			return _parse_double(buffer)
 		"$":
 			return _parse_bulk_string(buffer)
 		"*":
 			return _parse_array(buffer)
+		"~":
+			return _parse_set(buffer)
 		"%":
 			return _parse_map(buffer)
 		">":
@@ -498,6 +1209,27 @@ func _parse_integer(buffer: PackedByteArray) -> Dictionary:
 	for i in range(line_end + 2):
 		buffer.remove_at(0)
 	return {"value": int(num_str)}
+
+func _parse_boolean(buffer: PackedByteArray) -> Dictionary:
+	if buffer.size() < 4:  # #t\r\n or #f\r\n
+		return {"incomplete": true}
+
+	var bool_char = char(buffer[1])
+	for i in range(4):
+		buffer.remove_at(0)
+
+	return {"value": bool_char == "t"}
+
+func _parse_double(buffer: PackedByteArray) -> Dictionary:
+	var line_end = _find_crlf_in_buffer(buffer)
+	if line_end == -1:
+		return {"incomplete": true}
+
+	var double_str = buffer.slice(1, line_end).get_string_from_utf8()
+	for i in range(line_end + 2):
+		buffer.remove_at(0)
+
+	return {"value": float(double_str)}
 
 func _parse_bulk_string(buffer: PackedByteArray) -> Dictionary:
 	var line_end = _find_crlf_in_buffer(buffer)
@@ -580,6 +1312,34 @@ func _parse_map(buffer: PackedByteArray) -> Dictionary:
 
 	return {"value": map}
 
+func _parse_set(buffer: PackedByteArray) -> Dictionary:
+	var line_end = _find_crlf_in_buffer(buffer)
+	if line_end == -1:
+		return {"incomplete": true}
+
+	var count_str = buffer.slice(1, line_end).get_string_from_utf8()
+	var count = int(count_str)
+
+	if count == -1:
+		for i in range(line_end + 2):
+			buffer.remove_at(0)
+			return {"value": null}
+
+	for i in range(line_end + 2):
+		buffer.remove_at(0)
+
+	var set_array = []
+	for i in range(count):
+		var element = _try_parse_resp_from_buffer(buffer)
+		if element.has("incomplete"):
+			return {"incomplete": true}
+		elif element.has("error"):
+			return element
+		else:
+			set_array.append(element["value"])
+
+	return {"value": set_array}
+		
 func _parse_push(buffer: PackedByteArray) -> Dictionary:
 	var line_end = _find_crlf_in_buffer(buffer)
 	if line_end == -1:
