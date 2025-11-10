@@ -24,6 +24,7 @@ Note that the pub/sub examples use credentials (found below) so you'll need to c
 	})` - Set a key to a whole hash at once
 * `var count = await redis.publish("updates", "Data was modified")
    print("Published message to %d subscribers" % count)` - Publish a message on a channel
+* `await redis.hset_resource("testing", load("res://addons/godot_redis_client/examples/resource/test.tres"))` - Directly set a value with the contents of a custom resource!
 
 
 ## Signals
