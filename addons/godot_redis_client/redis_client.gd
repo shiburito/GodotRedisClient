@@ -16,11 +16,11 @@ var request_timeout_seconds : int
 var _command_buffer : PackedByteArray = []
 var _pubsub_buffer : PackedByteArray = []
 var _socket_buffer : PackedByteArray = []
-var _is_pubsub_mode : bool = false
 var _pubsub_polling : bool = false
 var _router_running : bool = false
+var run_mode : RUN_MODE
 
-const NOT_IN_PUB_SUB = "Not in pub/sub mode, nothing to unsubscribe"
+enum RUN_MODE{DEFAULT,PUBLISH,SUBSCRIBE}
 
 func _init(host : String = "127.0.0.1", port : int = 6379, client_timeout_seconds : int = 5, request_timeout_seconds : int = 5) -> void:
 	self.host = host
@@ -57,12 +57,17 @@ func connect_to_redis(credentials : Dictionary = {}) -> bool:
 
 	var hello_command = ["HELLO", "3"]
 	
+	if credentials.has("user") || credentials.has("pass"): hello_command.append("AUTH")
 	if credentials.has("user"): hello_command.append(credentials["user"])
 	if credentials.has("pass"): hello_command.append(credentials["pass"])
 	
 	var resp = await _send_command_array(hello_command)
 
 	if resp is Dictionary and resp.has("error"):
+		if resp["error"].begins_with("WRONGPASS"):
+			push_error("Invalid credentials specified for connection " + (host + ":" + str(port)))
+			push_error(resp["error"])
+			return false
 		push_warning("HELLO 3 failed, falling back to RESP2: %s" % resp["error"])
 
 	return connected()
@@ -70,7 +75,21 @@ func connect_to_redis(credentials : Dictionary = {}) -> bool:
 func connected() -> bool:
 	return connection.get_status() == StreamPeerTCP.STATUS_CONNECTED
 
+func subscribe_mode() -> bool:
+	return run_mode == RUN_MODE.SUBSCRIBE
+
+func publish_mode() -> bool:
+	return run_mode == RUN_MODE.PUBLISH
+
+func default_mode() -> bool:
+	return run_mode == RUN_MODE.DEFAULT
+
 func setex(key: String, value: String, ttl: int) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run setex against a client in publish/subscribe mode %s" % (key + " " + value + " " + str(ttl)))
+		return false
+	
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var response = await _send_command_array(["SETEX", key, str(ttl), value])
 	if response is Dictionary and response.has("error"):
 		push_error("SETEX failed: %s" % response["error"])
@@ -78,14 +97,22 @@ func setex(key: String, value: String, ttl: int) -> bool:
 	return response == "OK"
 
 func set_value(key: String, value: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run set_value against a client in publish/subscribe mode %s" % (key + " " + value))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var response = await _send_command_array(["SET", key, value])
 	if response is Dictionary and response.has("error"):
 		push_error("SET failed: %s" % response["error"])
 		return false
-	print("RESP: " + response)
+
 	return response == "OK"
 
 func get_value(key: String) -> String:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run get_value against a client in publish/subscribe mode %s" % key)
+		return ""
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var response = await _send_command_array(["GET", key])
 	if response is Dictionary and response.has("error"):
 		push_error("GET failed: %s" % response["error"])
@@ -95,6 +122,10 @@ func get_value(key: String) -> String:
 	return str(response)
 
 func delete(key: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run delete against a client in publish/subscribe mode %s" % key)
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var response = await _send_command_array(["DEL", key])
 	if response is Dictionary and response.has("error"):
 		push_error("DEL failed: %s" % response["error"])
@@ -102,13 +133,22 @@ func delete(key: String) -> bool:
 	return response == 1
 
 func hset(key: String, field: String, value: String) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hset against a client in publish/subscribe mode %s" % (key + " " + field + " " + value))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var response = await _send_command_array(["HSET", key, field, value])
 	if response is Dictionary and response.has("error"):
 		push_error("HSET failed: %s" % response["error"])
 		return false
+
 	return response == 1 or response == 0
 
 func hset_multi(key: String, fields: Dictionary) -> int:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hset_multi against a client in publish/subscribe mode %s" % (key + " " + str(fields)))
+		return -1
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var args = ["HSET", key]
 	for field in fields:
 		args.append(field)
@@ -121,6 +161,10 @@ func hset_multi(key: String, fields: Dictionary) -> int:
 	return response
 
 func hgetall(key: String) -> Dictionary:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run hgetall against a client in publish/subscribe mode %s" % key)
+		return {}
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var response = await _send_command_array(["HGETALL", key])
 	if response is Dictionary and response.has("error"):
 		push_error("HGETALL failed: %s" % response["error"])
@@ -128,6 +172,10 @@ func hgetall(key: String) -> Dictionary:
 	return response
 
 func expire(key: String, ttl: int) -> bool:
+	if run_mode && run_mode != RUN_MODE.DEFAULT:
+		printerr("You may not run expire against a client in publish/subscribe mode %s" % (key + " " + str(ttl)))
+		return false
+	if !run_mode: run_mode = RUN_MODE.DEFAULT
 	var response = await _send_command_array(["EXPIRE", key, str(ttl)])
 	if response is Dictionary and response.has("error"):
 		push_error("EXPIRE failed: %s" % response["error"])
@@ -135,6 +183,11 @@ func expire(key: String, ttl: int) -> bool:
 	return response == 1
 
 func publish(channel: String, message: String) -> int:
+	if run_mode && run_mode != RUN_MODE.PUBLISH:
+		printerr("You may not run publish against a client in default/subscribe mode %s" % (channel + " " + message))
+		return -1
+	
+	if !run_mode: run_mode = RUN_MODE.PUBLISH
 	var response = await _send_command_array(["PUBLISH", channel, message])
 	if response is Dictionary and response.has("error"):
 		push_error("PUBLISH failed: %s" % response["error"])
@@ -142,6 +195,10 @@ func publish(channel: String, message: String) -> int:
 	return response if response is int else 0
 
 func subscribe(channels: Array) -> bool:
+	if run_mode && run_mode != RUN_MODE.SUBSCRIBE:
+		printerr("You may not run subscribe against a client in default/publish mode %s" % str(channels))
+		return false
+		
 	if channels.is_empty():
 		push_error("No channels provided for subscription")
 		return false
@@ -152,14 +209,14 @@ func subscribe(channels: Array) -> bool:
 	var encoded = _encode_command(args)
 	connection.put_data(encoded)
 
-	_is_pubsub_mode = true
+	if !run_mode: run_mode = RUN_MODE.SUBSCRIBE
 	_start_pubsub_polling()
 
 	return true
 
 func unsubscribe(channels: Array = []) -> bool:
-	if not _is_pubsub_mode:
-		push_warning(NOT_IN_PUB_SUB)
+	if run_mode && run_mode != RUN_MODE.SUBSCRIBE:
+		printerr("You may not run unsubscribe against a client in default/publish mode %s" % str(channels))
 		return false
 
 	var args = ["UNSUBSCRIBE"]
@@ -168,10 +225,15 @@ func unsubscribe(channels: Array = []) -> bool:
 
 	var encoded = _encode_command(args)
 	connection.put_data(encoded)
-
+	if !run_mode: run_mode = RUN_MODE.SUBSCRIBE
+	
 	return true
 
 func psubscribe(patterns: Array) -> bool:
+	if run_mode && run_mode != RUN_MODE.SUBSCRIBE:
+		printerr("You may not run psubscribe against a client in default/publish mode %s" % str(patterns))
+		return false
+		
 	if patterns.is_empty():
 		push_error("No patterns provided for subscription")
 		return false
@@ -182,14 +244,14 @@ func psubscribe(patterns: Array) -> bool:
 	var encoded = _encode_command(args)
 	connection.put_data(encoded)
 
-	_is_pubsub_mode = true
+	if !run_mode: run_mode = RUN_MODE.SUBSCRIBE
 	_start_pubsub_polling()
 
 	return true
 
 func punsubscribe(patterns: Array = []) -> bool:
-	if not _is_pubsub_mode:
-		push_warning(NOT_IN_PUB_SUB)
+	if run_mode && run_mode != RUN_MODE.SUBSCRIBE:
+		printerr("You may not run punsubscribe against a client in default/publish mode %s" % str(patterns))
 		return false
 
 	var args = ["PUNSUBSCRIBE"]
@@ -198,6 +260,7 @@ func punsubscribe(patterns: Array = []) -> bool:
 
 	var encoded = _encode_command(args)
 	connection.put_data(encoded)
+	if !run_mode: run_mode = RUN_MODE.SUBSCRIBE
 
 	return true
 
@@ -238,7 +301,7 @@ func _handle_pubsub_message(msg):
 			if msg.size() >= 3:
 				unsubscribed.emit(str(msg[1]), int(msg[2]))
 				if int(msg[2]) == 0:
-					_is_pubsub_mode = false
+					run_mode = RUN_MODE.DEFAULT
 					_pubsub_polling = false
 		"psubscribe":
 			if msg.size() >= 3:
@@ -247,7 +310,7 @@ func _handle_pubsub_message(msg):
 			if msg.size() >= 3:
 				pattern_unsubscribed.emit(str(msg[1]), int(msg[2]))
 				if int(msg[2]) == 0:
-					_is_pubsub_mode = false
+					run_mode = RUN_MODE.DEFAULT
 					_pubsub_polling = false
 		"message":
 			if msg.size() >= 3:
@@ -255,9 +318,6 @@ func _handle_pubsub_message(msg):
 		"pmessage":
 			if msg.size() >= 4:
 				pattern_message_received.emit(str(msg[1]), str(msg[2]), str(msg[3]))
-
-func is_pubsub_mode() -> bool:
-	return _is_pubsub_mode
 
 func _encode_command(args: Array) -> PackedByteArray:
 	var result = PackedByteArray()
@@ -304,7 +364,10 @@ func _route_messages():
 				if result.has("incomplete"):
 					break
 				elif result.has("value") or result.has("error"):
-					_command_buffer.append_array(_encode_resp_value(result))
+					if _is_pubsub_message(result.get("value")):
+						_pubsub_buffer.append_array(_encode_resp_value(result))
+					else:
+						_command_buffer.append_array(_encode_resp_value(result))
 
 		await Engine.get_main_loop().create_timer(0.005).timeout
 
@@ -545,3 +608,10 @@ func _find_crlf_in_buffer(buffer: PackedByteArray) -> int:
 		if buffer[i] == 13 and buffer[i + 1] == 10:
 			return i
 	return -1
+
+func _is_pubsub_message(value) -> bool:
+	if not (value is Array) or value.is_empty():
+		return false
+
+	var first_element = str(value[0])
+	return first_element in ["subscribe", "unsubscribe", "psubscribe", "punsubscribe", "message", "pmessage"]

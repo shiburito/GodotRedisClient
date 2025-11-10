@@ -1,9 +1,12 @@
 # Godot Redis Client
 
-See the examples folder for full up-to-date implementation. You can run the example scene which will default to a local redis instance.
-
 I found the need for a simple redis client when needing to persist state of backend software so I created this.
 This was largly built off of reading [Redis serialization protocol specification](https://redis.io/docs/latest/develop/reference/protocol-spec/)
+
+See the examples folder for full up-to-date implementation. You can run the example scene which will default to a local redis instance. 
+Note that the pub/sub examples use credentials (found below) so you'll need to create the test user if you wish to run those examples without them erroring out.
+
+**NOTE** Be sure to use seperate connections for your regular redis calls (key gets, etc) and seperate for your pub / sub operations. The example in the examples folder shows this. I've built in error checking around this so if you mess up, it will show up in the error logs.
 
 ## Basic Usage
 * `var redis : RedisClient = RedisClient.new() as RedisClient` - Initialize the client, can pass in host, port and timeouts
@@ -32,3 +35,11 @@ There are various signals available from the client. These are generally for Pub
 * signal unsubscribed(channel: String, subscription_count: int)
 * signal pattern_subscribed(pattern: String, subscription_count: int)
 * signal pattern_unsubscribed(pattern: String, subscription_count: int)
+
+## Local Testing
+If you'd like to quickly get going locally you can run the below to start redis on your host in docker
+`docker run -d --name redis -p 6379:6379 -v redis-data:/data redis:latest redis-server --appendonly yes`
+
+To create a 'test' user with the password 'test123' (the one the example uses) if you'd like to use auth you can run the below after redis has started. 
+This gives the user very wide access so be sure to only do this for local testing purposes.
+`docker exec -it redis redis-cli ACL SETUSER test ON '>test123' ~* '&*' +@all`
